@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>High Low</title>
+<style>
+body {
+    margin: 0;
+    background: #172017;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    user-select: none;
+}
+.grayout {
+    filter: brightness(0.2);
+}
+.hidden {
+    visibility: hidden;
+}
+.tint {
+    background-color: rgba(255, 255, 0, 0.5);
+    background-blend-mode: multiply;
+}
+#overlay-message {
+    position: absolute;
+    top: 100px;
+    z-index: 10;
+    font-size: 48px;
+    font-weight: bold;
+    font-family: sans-serif;
+    color: #cccc00;
+    text-shadow: -1px -1px 2px #000000,
+                  0   -1px 2px #000000,
+                  1px -1px 2px #000000,
+                 -1px  0   2px #000000,
+                  1px  0   2px #000000,
+                 -1px  1px 2px #000000,
+                  0    1px 2px #000000,
+                  1px  1px 2px #000000;
+}
+#overlay-button {
+    position: absolute;
+    z-index: 10;
+    cursor: pointer;
+    margin-top: 20px;
+    padding: 8px 12px;
+    font-size: 36px;
+    font-weight: bold;
+    font-family: sans-serif;
+    background: #ffffff;
+    border: 3px solid #000000;
+    border-radius: 12px;
+    box-shadow: 0 0 4px #000000;
+}
+#deck {
+    margin: 12px;
+    display: flex;
+    flex-direction: column-reverse;
+    width: 128px;
+}
+.deck-row {
+    display: flex;
+    flex-direction: row;
+}
+#high-low {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+#history {
+    margin: 4px;
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    font-size: 10px;
+    color: #ffffff;
+}
+.history-index {
+    width: 33%;
+    text-align: center;
+}
+.history-pivot {
+    width: 33%;
+    text-align: center;
+}
+.history-target {
+    width: 33%;
+    text-align: center;
+}
+#card-slot {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+#card-slot-target {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    margin: 4px;
+
+    color: #ffffff;
+    stroke: #ffffff;
+    stroke-width: 3px;
+}
+.button:hover {
+    /* color: #ffff88; */
+    /* stroke: #ffff88; */
+}
+.button-text {
+    font-size: 16px;
+    font-weight: bold;
+    font-family: sans-serif;
+}
+.card-deck {
+    width: 28px;
+    height: 42px;
+    margin: 2px;
+    background-size: 392px 168px;
+}
+.card-interested {
+    width: 100px;
+    height: 150px;
+    margin: 4px;
+    background-size: 1400px 600px;
+}
+</style>
+<script type="text/javascript">
+class Card {
+    constructor(number, suit) {
+        this._number = number;
+        this._suit = suit;
+    }
+
+    static get NumberMap() { return ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']; }
+    static get SuitMap() { return ['♣', '♦', '♥', '♠']; }
+
+    get number() { return this._number; }
+    get suit() { return this._suit; }
+
+    toString() {
+        return `${Card.SuitMap[this._suit]}${Card.NumberMap[this._number-1]}`;
+    }
+}
+
+class Renderer {
+    constructor(root, onClickHigh, onClickLow, onClickNewGame) {
+        this._domRoot = root;
+
+        this._domDeck = this._addChild(this._domRoot, 'deck');
+        this._domHighLow = this._addChild(this._domRoot, 'high-low');
+
+        this._domCards = [];
+        for (let i = 0; i < 13; i++) {
+            const domDeckRow = this._addChild(this._domDeck, null, ['deck-row']);
+
+            for (let j = 0; j < 4; j++) {
+                const index = i*4+j;
+
+                this._domCards[index] = this._addChild(domDeckRow, null, ['card', 'card-deck']);
+                this._domCards[index].style.backgroundImage = 'url(./assets/images/cards.png)';
+                this._setImage(this._domCards[index], index, 0.28);
+            }
+        }
+
+        this._domHistory = this._addChild(this._domHighLow, 'history', [], 'table');
+        this._domCardSlot = this._addChild(this._domHighLow, 'card-slot');
+
+        const domHistoryHeader = this._addChild(this._domHistory, 'history-header', ['history-row'], 'tr');
+        const domHistoryHeaderIndex = this._addChild(domHistoryHeader, null, ['history-index'], 'td');
+        const domHistoryHeaderPivot = this._addChild(domHistoryHeader, null, ['history-pivot'], 'td');
+        const domHistoryHeaderTarget = this._addChild(domHistoryHeader, null, ['history-target'], 'td');
+        domHistoryHeaderIndex.textContent = 'trial';
+        domHistoryHeaderPivot.textContent = 'pivot';
+        domHistoryHeaderTarget.textContent = 'target';
+        this._domHistoryIndices = [];
+        this._domHistoryPivots = [];
+        this._domHistoryTargets = [];
+        for (let i = 0; i < 25; i++) {
+            const domHistoryRow = this._addChild(this._domHistory, null, ['history-row'], 'tr');
+            this._domHistoryIndices[i] = this._addChild(domHistoryRow, null, ['history-index'], 'td');
+            this._domHistoryPivots[i] = this._addChild(domHistoryRow, null, ['history-pivot'], 'td');
+            this._domHistoryTargets[i] = this._addChild(domHistoryRow, null, ['history-target'], 'td');
+            this._domHistoryIndices[i].textContent = (i+1).toString();
+        }
+
+        this._domCardSlotPivot = this._addChild(this._domCardSlot, 'card-slot-pivot');
+        this._domCardSlotTarget = this._addChild(this._domCardSlot, 'card-slot-target');
+
+        this._domCardPivot = this._addChild(this._domCardSlotPivot, 'card-pivot', ['card', 'card-interested']);
+        this._domCardPivot.style.backgroundImage = 'url(./assets/images/cards.png)';
+
+        this._domButtonHigh = this._addChild(this._domCardSlotTarget, 'button-high', ['button']);
+        this._domCardTarget = this._addChild(this._domCardSlotTarget, 'card-target', ['card', 'card-interested']);
+        this._domCardTarget.style.backgroundImage = 'url(./assets/images/cards.png)';
+        this._domButtonLow = this._addChild(this._domCardSlotTarget, 'button-low', ['button']);
+
+        this._createHighLowButton(this._domButtonHigh, true);
+        this._createHighLowButton(this._domButtonLow, false);
+
+        this._domMessage = this._addChild(this._domRoot, 'overlay-message');
+
+        this._domButtonNewGame = this._addChild(this._domRoot, 'overlay-button');
+        this._domButtonNewGame.textContent = 'NEW GAME';
+
+        this._domButtonHigh.addEventListener('click', onClickHigh);
+        this._domButtonLow.addEventListener('click', onClickLow);
+        this._domButtonNewGame.addEventListener('click', onClickNewGame);
+
+        this._domHistory.style.display = 'none';
+
+        this.reset();
+    }
+
+    reset() {
+        for (const elem of this._domCards) {
+            elem.classList.remove('grayout', 'tint');
+        }
+
+        for (const elem of this._domHistoryPivots) {
+            elem.textContent = '';
+        }
+
+        for (const elem of this._domHistoryTargets) {
+            elem.textContent = '';
+        }
+
+        this._setMessage(null);
+        this._setNewButtonVisibility(false);
+    }
+
+    setCardPivot(card) {
+        const index = this._retrieveCardIndex(card);
+        this._setImage(this._domCardPivot, index);
+        this._domCards[index].classList.add('tint');
+    }
+
+    setCardTarget(card) {
+        const index = this._retrieveCardIndex(card);
+        this._setImage(this._domCardTarget, index);
+    }
+
+    onWin(cardPivot, cardTarget, trialIndex) {
+        this._domCards[this._retrieveCardIndex(cardPivot)].classList.remove('tint');
+        this._domCards[this._retrieveCardIndex(cardPivot)].classList.add('grayout');
+        this._domCards[this._retrieveCardIndex(cardTarget)].classList.add('grayout');
+        this._domHistoryPivots[trialIndex].textContent = cardPivot.toString();
+        this._domHistoryTargets[trialIndex].textContent = cardTarget.toString();
+        this._setMessage('WIN');
+    }
+
+    onAfterWin(cardPivot, cardTarget, trialIndex) {
+        this._setMessage(null);
+    }
+
+    onLose(cardPivot, cardTarget, trialIndex) {
+        this._domCards[this._retrieveCardIndex(cardPivot)].classList.remove('tint');
+        this._setMessage('LOSE');
+    }
+
+    onAfterLose(cardPivot, cardTarget, trialIndex) {
+        this._setNewButtonVisibility(true);
+    }
+
+    onClear(cardPivot, cardTarget, trialIndex) {
+        this._domCards[this._retrieveCardIndex(cardPivot)].classList.remove('tint');
+        this._domCards[this._retrieveCardIndex(cardPivot)].classList.add('grayout');
+        this._domCards[this._retrieveCardIndex(cardTarget)].classList.add('grayout');
+        this._setMessage('CLEAR');
+    }
+
+    onAfterClear(cardPivot, cardTarget, trialIndex) {
+        this._setNewButtonVisibility(true);
+    }
+
+    _addChild(parent, id=null, classList=[], type='div', child=null) {
+        child = (child !== null) ? child : document.createElement(type);
+        for (const c of classList) {
+            child.classList.add(c);
+        }
+        if (id !== null) {
+            child.setAttribute('id', id);
+        }
+        parent.appendChild(child);
+
+        return child;
+    }
+
+    _createHighLowButton(parent, high) {
+        const ns = 'http://www.w3.org/2000/svg';
+
+        const svg = document.createElementNS(ns, 'svg');
+        svg.classList.add('button-arrow');
+        svg.setAttribute('width', 80);
+        svg.setAttribute('height', 20);
+        svg.setAttribute('viewBox', '0 0 80 20');
+
+        const line = document.createElementNS(ns, 'path');
+        line.setAttribute('d', 'M 5,5 L 40,15 L75,5');
+        line.setAttribute('fill', 'none');
+        svg.appendChild(line);
+
+        const text = document.createElement('div');
+        text.classList.add('button-text');
+
+        if (high) {
+            svg.style.transform = 'scaleY(-1)';
+            text.textContent = 'HIGH';
+            parent.appendChild(svg);
+            parent.appendChild(text);
+        }
+        else {
+            text.textContent = 'LOW';
+            parent.appendChild(text);
+            parent.appendChild(svg);
+        }
+
+        return parent;
+    }
+
+    _retrieveCardIndex(card) {
+        return 4 * (card.number-1) + card.suit;
+    }
+
+    _setNewButtonVisibility(visible) {
+        if (visible) {
+            this._domButtonNewGame.classList.remove('hidden');
+        }
+        else {
+            this._domButtonNewGame.classList.add('hidden');   
+        }
+    }
+
+    _setMessage(message=null) {
+        if (message === null) {
+            this._domMessage.classList.add('hidden');
+        }
+        else {
+            this._domMessage.textContent = message;
+            this._domMessage.classList.remove('hidden');
+        }
+    }
+
+    _setImage(elem, index, scale=1.0) {
+        const x = Math.round(scale * 100 * Math.floor(index/4));
+        const y = Math.round(scale * 150 * (index%4));
+        elem.style.backgroundPositionX = `-${x}px`;
+        elem.style.backgroundPositionY = `-${y}px`;
+    }
+}
+
+class Game {
+    constructor(root=document.body) {
+        this._renderer = new Renderer(
+                root,
+                () => { this._openCard(false); },
+                () => { this._openCard(true); },
+                () => { this._newGame(); });
+
+        this._waitResultMillis = 800;
+        this._waitGameoverMillis = 1500;
+
+        this._deck = [];
+        this._cardReversed = new Card(14, 3);
+        this._trialIndex = 0;
+        this._pivotIndex = 0;
+        this._targetIndex = 0;
+        this._state = Game.StateGameover;
+
+        this._newGame();
+    }
+
+    static get StateGameover() { return 0; }
+    static get StatePlaying() { return 1; }
+    static get StateWaitng() { return 2; }
+
+    _newGame() {
+        if (this._state !== Game.StateGameover) {
+            return;
+        }
+
+        this._deck = [];
+        this._trialIndex = 0;
+        this._pivotIndex = 0;
+        this._targetIndex = 0;
+
+        for (let i = 0; i < 52; i++) {
+            this._deck[i] = new Card(Math.floor(i/4)+1, i%4);
+        }
+
+        this._renderer.reset();
+
+        this._nextCard();
+    }
+
+    _nextCard() {
+        this._state = Game.StatePlaying;
+
+        this._pivotIndex = Math.floor(Math.random() * this._deck.length);
+
+        const cardPivot = this._deck[this._pivotIndex];
+        this._renderer.setCardPivot(cardPivot);
+        this._renderer.setCardTarget(this._cardReversed);
+    }
+
+    _openCard(chooseLow) {
+        if (this._state !== Game.StatePlaying) {
+            return;
+        }
+
+        this._state = Game.StateWaitng;
+
+        this._targetIndex = Math.floor(Math.random() * (this._deck.length-1));
+        this._targetIndex = (this._pivotIndex > this._targetIndex) ? this._targetIndex : this._targetIndex+1;
+
+        const cardPivot = this._deck[this._pivotIndex];
+        const cardTarget = this._deck[this._targetIndex];
+        this._renderer.setCardTarget(cardTarget);
+
+        const win = chooseLow === (cardPivot.number > cardTarget.number);
+
+        if (win) {
+            if (this._deck.length <= 2) {
+                this._renderer.onClear(cardPivot, cardTarget, this._trialIndex);
+
+                setTimeout(() => {
+                    this._state = Game.StateGameover;
+                    this._renderer.onAfterClear(cardPivot, cardTarget, this._trialIndex);
+                }, this._waitGameoverMillis)
+
+                return;
+            }
+
+            this._renderer.onWin(cardPivot, cardTarget, this._trialIndex);
+
+            const p = this._pivotIndex;
+            const t = this._targetIndex;
+            const [indexLarge, indexSmall] = (p > t) ? [p, t] : [t, p];
+            this._deck.splice(indexLarge, 1);
+            this._deck.splice(indexSmall, 1);
+
+            ++this._trialIndex;
+
+            setTimeout(() => {
+                this._renderer.onAfterWin(cardPivot, cardTarget, this._trialIndex);
+                this._nextCard();
+            }, this._waitResultMillis);
+        }
+        else {
+            this._renderer.onLose(cardPivot, cardTarget, this._trialIndex);
+
+            setTimeout(() => {
+                this._state = Game.StateGameover;
+                this._renderer.onAfterLose(cardPivot, cardTarget, this._trialIndex);
+            }, this._waitResultMillis);
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    new Game();
+});
+</script>
+</head>
+<body>
+</body>
+</html>
